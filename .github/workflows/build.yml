@@ -1,0 +1,90 @@
+name: Build China Client
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract source.zip
+        run: |
+          # Prefer ChinaClient-source.zip, then source.zip
+          if [ -f "ChinaClient-source.zip" ]; then
+            echo "Found ChinaClient-source.zip"
+            unzip -o ChinaClient-source.zip
+          elif [ -f "source.zip" ]; then
+            echo "Found source.zip"
+            unzip -o source.zip
+          else
+            echo "No source.zip found. Assuming source is already in the repository root."
+          fi
+
+          # Detect project root (folder that contains build.gradle)
+          if [ -f "build.gradle" ]; then
+            echo "Project root is current directory"
+            echo "PROJECT_DIR=." >> $GITHUB_ENV
+          elif [ -f "ChinaClient/build.gradle" ]; then
+            echo "Project root is ChinaClient/"
+            echo "PROJECT_DIR=ChinaClient" >> $GITHUB_ENV
+          else
+            # Fallback: search for build.gradle
+            FOUND=$(find . -name "build.gradle" -type f | head -n 1)
+            if [ -n "$FOUND" ]; then
+              DIR=$(dirname "$FOUND")
+              echo "Found build.gradle in $DIR"
+              echo "PROJECT_DIR=$DIR" >> $GITHUB_ENV
+            else
+              echo "ERROR: Could not find build.gradle after extraction"
+              ls -la
+              exit 1
+            fi
+          fi
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Build with Gradle
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          echo "Building from: $(pwd)"
+          ls -la
+
+          if [ -f ./gradlew ]; then
+            chmod +x ./gradlew
+            ./gradlew build --no-daemon --stacktrace
+          else
+            # Generate wrapper if missing, then build
+            gradle wrapper --gradle-version 8.8 || true
+            if [ -f ./gradlew ]; then
+              chmod +x ./gradlew
+              ./gradlew build --no-daemon --stacktrace
+            else
+              gradle build --no-daemon --stacktrace
+            fi
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: China-Client
+          path: |
+            ${{ env.PROJECT_DIR }}/build/libs/*.jar
+            !${{ env.PROJECT_DIR }}/build/libs/*-sources.jar
+            !${{ env.PROJECT_DIR }}/build/libs/*-dev.jar
+            !${{ env.PROJECT_DIR }}/build/libs/*-javadoc.jar
+          retention-days: 30
